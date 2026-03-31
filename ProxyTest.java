@@ -239,7 +239,9 @@ public class ProxyTest {
                 } catch (Exception e) {
                     System.err.println("WARN     " + e.getClass().getSimpleName() + ": " + e.getMessage());
                     if (e.getCause() != null) System.err.println("Cause:   " + e.getCause());
-                    System.err.println("         Proxy may use plain HTTP or need a custom trust store.");
+                    System.err.println("         This is expected if the proxy speaks plain HTTP (not HTTPS).");
+                    System.err.println("         If unexpected, the trust store may be missing the proxy's CA.");
+                    System.err.println("         See: ./import-certs.sh <ca-bundle.pem> ./cacerts");
                 }
                 System.out.println();
             }
