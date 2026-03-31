@@ -226,13 +226,13 @@ public class ProxyTest {
             if (!skip.contains("tls")) {
                 System.out.println("--- Phase 3: TLS Handshake to Proxy ---");
 
-                // First, grab the cert chain regardless of trust (for diagnostics)
+                // First, probe to see if the proxy speaks TLS at all
+                boolean proxyHasTls = false;
                 try {
                     X509TrustManager trustAll = new X509TrustManager() {
-                        private X509Certificate[] chain;
                         public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
                         public void checkClientTrusted(X509Certificate[] c, String t) {}
-                        public void checkServerTrusted(X509Certificate[] c, String t) { this.chain = c; }
+                        public void checkServerTrusted(X509Certificate[] c, String t) {}
                     };
                     SSLContext probeCtx = SSLContext.getInstance("TLS");
                     probeCtx.init(null, new javax.net.ssl.TrustManager[]{trustAll}, null);
@@ -241,6 +241,7 @@ public class ProxyTest {
                     probeSock.startHandshake();
                     java.security.cert.Certificate[] certs = probeSock.getSession().getPeerCertificates();
                     probeSock.close();
+                    proxyHasTls = true;
 
                     System.out.println("Certs presented by proxy (" + certs.length + "):");
                     for (int i = 0; i < certs.length; i++) {
@@ -254,31 +255,30 @@ public class ProxyTest {
                     }
                     System.out.println();
                 } catch (Exception e) {
-                    System.err.println("         Could not retrieve proxy certs: " + e.getMessage());
-                    System.err.println("         Proxy likely does not speak TLS on this port.");
-                    System.out.println();
+                    System.out.println("OK       Proxy is plain HTTP (does not speak TLS). This is normal.");
                 }
 
-                // Now try the real handshake with the configured trust store
-                try {
-                    SSLSocketFactory sf = customSslContext != null
-                            ? customSslContext.getSocketFactory()
-                            : (SSLSocketFactory) SSLSocketFactory.getDefault();
-                    long t0 = System.currentTimeMillis();
-                    SSLSocket sslSock = (SSLSocket) sf.createSocket(effectiveHost, effectivePort);
-                    sslSock.setSoTimeout(connectTimeout * 1000);
-                    sslSock.startHandshake();
-                    System.out.println("OK       TLS handshake in " + (System.currentTimeMillis() - t0) + " ms");
-                    System.out.println("Proto:   " + sslSock.getSession().getProtocol());
-                    System.out.println("Cipher:  " + sslSock.getSession().getCipherSuite());
-                    System.out.println("Peer:    " + sslSock.getSession().getPeerPrincipal());
-                    sslSock.close();
-                } catch (Exception e) {
-                    System.err.println("WARN     " + e.getClass().getSimpleName() + ": " + e.getMessage());
-                    if (e.getCause() != null) System.err.println("Cause:   " + e.getCause());
-                    System.err.println("         This is expected if the proxy speaks plain HTTP (not HTTPS).");
-                    System.err.println("         If unexpected, the trust store may be missing the proxy's CA.");
-                    System.err.println("         See: ./import-certs.sh <ca-bundle.pem> ./cacerts");
+                // If proxy speaks TLS, verify against the configured trust store
+                if (proxyHasTls) {
+                    try {
+                        SSLSocketFactory sf = customSslContext != null
+                                ? customSslContext.getSocketFactory()
+                                : (SSLSocketFactory) SSLSocketFactory.getDefault();
+                        long t0 = System.currentTimeMillis();
+                        SSLSocket sslSock = (SSLSocket) sf.createSocket(effectiveHost, effectivePort);
+                        sslSock.setSoTimeout(connectTimeout * 1000);
+                        sslSock.startHandshake();
+                        System.out.println("OK       TLS verified in " + (System.currentTimeMillis() - t0) + " ms");
+                        System.out.println("Proto:   " + sslSock.getSession().getProtocol());
+                        System.out.println("Cipher:  " + sslSock.getSession().getCipherSuite());
+                        System.out.println("Peer:    " + sslSock.getSession().getPeerPrincipal());
+                        sslSock.close();
+                    } catch (Exception e) {
+                        System.err.println("FAIL     Trust store does not trust the proxy's certificate.");
+                        System.err.println("         " + e.getClass().getSimpleName() + ": " + e.getMessage());
+                        System.err.println("         Import the root CA shown above into your trust store:");
+                        System.err.println("         ./import-certs.sh <ca-bundle.pem> ./cacerts");
+                    }
                 }
                 System.out.println();
             }
