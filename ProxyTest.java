@@ -18,10 +18,12 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.security.cert.X509Certificate;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509TrustManager;
 
 /**
  * Proxy troubleshooting tool. Reads config from proxytest.properties.
@@ -223,6 +225,41 @@ public class ProxyTest {
 
             if (!skip.contains("tls")) {
                 System.out.println("--- Phase 3: TLS Handshake to Proxy ---");
+
+                // First, grab the cert chain regardless of trust (for diagnostics)
+                try {
+                    X509TrustManager trustAll = new X509TrustManager() {
+                        private X509Certificate[] chain;
+                        public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+                        public void checkClientTrusted(X509Certificate[] c, String t) {}
+                        public void checkServerTrusted(X509Certificate[] c, String t) { this.chain = c; }
+                    };
+                    SSLContext probeCtx = SSLContext.getInstance("TLS");
+                    probeCtx.init(null, new javax.net.ssl.TrustManager[]{trustAll}, null);
+                    SSLSocket probeSock = (SSLSocket) probeCtx.getSocketFactory().createSocket(effectiveHost, effectivePort);
+                    probeSock.setSoTimeout(connectTimeout * 1000);
+                    probeSock.startHandshake();
+                    java.security.cert.Certificate[] certs = probeSock.getSession().getPeerCertificates();
+                    probeSock.close();
+
+                    System.out.println("Certs presented by proxy (" + certs.length + "):");
+                    for (int i = 0; i < certs.length; i++) {
+                        if (certs[i] instanceof X509Certificate) {
+                            X509Certificate x = (X509Certificate) certs[i];
+                            String label = (i == 0) ? "leaf" : (i == certs.length - 1) ? "root" : "intermediate";
+                            System.out.println("  [" + i + "] (" + label + ") Subject: " + x.getSubjectX500Principal());
+                            System.out.println("       Issuer:  " + x.getIssuerX500Principal());
+                            System.out.println("       Expires: " + x.getNotAfter());
+                        }
+                    }
+                    System.out.println();
+                } catch (Exception e) {
+                    System.err.println("         Could not retrieve proxy certs: " + e.getMessage());
+                    System.err.println("         Proxy likely does not speak TLS on this port.");
+                    System.out.println();
+                }
+
+                // Now try the real handshake with the configured trust store
                 try {
                     SSLSocketFactory sf = customSslContext != null
                             ? customSslContext.getSocketFactory()
