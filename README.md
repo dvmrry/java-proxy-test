@@ -72,8 +72,29 @@ java -Djavax.net.debug=ssl,handshake ProxyTest
 java ProxyTest --help
 ```
 
+## TLS / Custom Trust Store
+
+If your proxy intercepts HTTPS (e.g. Zscaler, corporate SSL inspection), Java won't trust it by default. You need to import the intercepting CA into a local keystore:
+
+```bash
+# Export certs from macOS keychain (search for your org's CA name)
+security find-certificate -a -c "YourOrg" -p /Library/Keychains/System.keychain > /tmp/ca-bundle.pem
+
+# Or on Linux, get the proxy's cert chain directly
+openssl s_client -connect proxy.example.com:9443 -showcerts </dev/null 2>/dev/null | openssl x509 -outform PEM > /tmp/ca-bundle.pem
+
+# Copy Java's default trust store locally
+cp $JAVA_HOME/lib/security/cacerts ./cacerts
+
+# Import all certs from the bundle
+./import-certs.sh /tmp/ca-bundle.pem ./cacerts
+```
+
+Then set `truststore.path=./cacerts` in your properties file.
+
 ## Files
 
 - `ProxyTest.java` — the tool (single file, no dependencies)
 - `proxytest.properties` — default config (generic placeholders)
 - `proxytest-confluence.properties` — sample config for Confluence/Tomcat environments
+- `import-certs.sh` — helper to import PEM cert bundles into a Java keystore
